@@ -15,9 +15,9 @@ A minimal HTTP file transfer service for temporary file sharing.
 ### Start the server
 
 ```bash
-go run main.go
-# or with custom port
-go run main.go -port 8080
+go build
+# If no port is specified, remcpy defaults to 5000
+./remcpy -port 8080
 ```
 
 ### Upload a file
