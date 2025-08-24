@@ -11,7 +11,10 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const MaxFileSize = 5 * 1024 * 1024 * 1024 // 5GB in bytes
@@ -23,9 +26,21 @@ func InitDir() error {
 	return nil
 }
 
-func ClearFiles(deleteQueue <-chan string) {
-	for filepath := range deleteQueue {
-		if err := os.RemoveAll(filepath); err != nil {
+type UniquePath struct {
+	Path string
+	Id   uuid.UUID
+}
+
+func ClearFiles(deleteQueue <-chan UniquePath, records *sync.Map) {
+	for uniquePath := range deleteQueue {
+
+		if id, _ := records.Load(uniquePath.Path); id.(uuid.UUID) != uniquePath.Id {
+
+			continue
+
+		}
+
+		if err := os.RemoveAll(uniquePath.Path); err != nil {
 			log.Println("Error removing file: " + err.Error())
 		}
 	}
@@ -34,7 +49,8 @@ func ClearFiles(deleteQueue <-chan string) {
 type Router struct {
 	mux         *http.ServeMux
 	logger      *slog.Logger
-	deleteQueue chan string
+	deleteQueue chan UniquePath
+	records     sync.Map
 	displayHost string
 }
 
@@ -42,7 +58,8 @@ func NewRouter(displayHost string) *Router {
 	return &Router{
 		mux:         http.NewServeMux(),
 		logger:      slog.Default(),
-		deleteQueue: make(chan string),
+		deleteQueue: make(chan UniquePath),
+		records:     sync.Map{},
 		displayHost: displayHost,
 	}
 }
@@ -288,10 +305,30 @@ func UploadController(router *Router) func(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-		go func() {
+		var id uuid.UUID
+
+		for {
+
+			id, err = uuid.NewV7()
+			if err == nil {
+
+				break
+
+			}
+
+		}
+
+		// A uuid is obtained to uniquely identify a file if its overwritten, preventing an older non-existing version from deleting a newer one sooner than 1 hour
+
+		router.records.Store(filePath, id)
+
+		go func(filepath string, id uuid.UUID) {
+
 			<-time.After(time.Hour)
-			router.deleteQueue <- filePath
-		}()
+			router.deleteQueue <- UniquePath{Path: filepath, Id: id}
+			router.records.Delete(filepath)
+
+		}(filePath, id)
 
 		downloadURL := fmt.Sprintf("/@%s", ident)
 
@@ -327,7 +364,7 @@ func ApplyControllers(router *Router) {
 		}
 	})
 
-	go ClearFiles(router.deleteQueue)
+	go ClearFiles(router.deleteQueue, &router.records)
 }
 
 func main() {
