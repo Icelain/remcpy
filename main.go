@@ -35,13 +35,15 @@ type Router struct {
 	mux         *http.ServeMux
 	logger      *slog.Logger
 	deleteQueue chan string
+	displayHost string
 }
 
-func NewRouter() *Router {
+func NewRouter(displayHost string) *Router {
 	return &Router{
 		mux:         http.NewServeMux(),
 		logger:      slog.Default(),
 		deleteQueue: make(chan string),
+		displayHost: displayHost,
 	}
 }
 
@@ -182,20 +184,20 @@ func IndexController(router *Router) func(w http.ResponseWriter, r *http.Request
 			<div class="method post">POST</div>
 			<div class="path">/@{identifier}</div>
 			<div class="description">Upload a file with the specified identifier</div>
-			<div class="example">curl -X POST -F "file=@example.txt" http://localhost:5000/@myfile</div>
+			<div class="example">curl -X POST -F "file=@example.txt" https://%s/@myfile</div>
 		</div>
 		
 		<div class="endpoint">
 			<div class="method get">GET</div>
 			<div class="path">/@{identifier}</div>
 			<div class="description">Download the file with the specified identifier</div>
-			<div class="example">curl -X GET http://localhost:5000/@myfile</div>
+			<div class="example">curl -X GET http://%s/@myfile</div>
 		</div>
 		
 		<div class="limit">Maximum file size: 5GB</div>
 	</div>
 </body>
-</html>`)
+</html>`, router.displayHost, router.displayHost)
 	}
 }
 
@@ -330,9 +332,11 @@ func ApplyControllers(router *Router) {
 
 func main() {
 	port := flag.Uint("port", 5000, "Port to run remcpy on")
+	displayHost := flag.String("display-host", "remcpy.ice.computer", "Host to show in the remcpy default page")
+
 	flag.Parse()
 
-	router := NewRouter()
+	router := NewRouter(*displayHost)
 	ApplyControllers(router)
 
 	if err := InitDir(); err != nil {
