@@ -12,6 +12,8 @@ A minimal HTTP file transfer service for temporary file sharing.
 
 ## Usage
 
+### Try at [remcpy.ice.computer](remcpy.ice.computer)
+
 ### Start the server
 
 ```bash
