@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 func InitDir() error {
@@ -20,15 +21,31 @@ func InitDir() error {
 	return nil
 }
 
+func ClearFiles(deleteQueue <-chan string) {
+
+	for filepath := range deleteQueue {
+
+		if err := os.RemoveAll(filepath); err != nil {
+
+			log.Println("Error removing file: " + err.Error())
+
+		}
+
+	}
+
+}
+
 type Router struct {
-	mux    *http.ServeMux
-	logger *slog.Logger
+	mux         *http.ServeMux
+	logger      *slog.Logger
+	deleteQueue chan string // queue for deleting files at the given filepath
 }
 
 func NewRouter() *Router {
 	return &Router{
-		mux:    http.NewServeMux(),
-		logger: slog.Default(),
+		mux:         http.NewServeMux(),
+		logger:      slog.Default(),
+		deleteQueue: make(chan string),
 	}
 }
 
@@ -98,7 +115,8 @@ func UploadController(router *Router) func(w http.ResponseWriter, r *http.Reques
 		}
 		defer fileReader.Close()
 
-		osFile, err := os.Create(fmt.Sprintf("./store/@%s", ident))
+		filePath := fmt.Sprintf("./store/@%s", ident)
+		osFile, err := os.Create(filePath)
 		if err != nil {
 			http.Error(w, "Internal error: file creation", http.StatusInternalServerError)
 			router.logger.Debug("Error creating os file: " + err.Error())
@@ -113,9 +131,16 @@ func UploadController(router *Router) func(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
+		go func() {
+
+			<-time.After(time.Hour)
+			router.deleteQueue <- filePath
+
+		}()
+
 		downloadURL := fmt.Sprintf("/@%s", ident)
 
-		response := fmt.Sprintf("Temporary remote copy made successfully.\nFile: %s\nSize Written: %d\nAccess at: GET %s",
+		response := fmt.Sprintf("Temporary remote copy made successfully.\nFile: %s\nBytes Written: %d\nAccess at: GET %s",
 			fileHeader.Filename, n, downloadURL)
 
 		_, err = w.Write([]byte(response))
@@ -127,10 +152,9 @@ func UploadController(router *Router) func(w http.ResponseWriter, r *http.Reques
 }
 
 func ApplyControllers(router *Router) {
-	router.mux.HandleFunc("GET /", IndexController(router))
-
 	router.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
+			IndexController(router)(w, r)
 			return
 		}
 
@@ -147,6 +171,8 @@ func ApplyControllers(router *Router) {
 			http.Error(w, "Invalid endpoint. Use /@{identifier}", http.StatusBadRequest)
 		}
 	})
+
+	go ClearFiles(router.deleteQueue)
 }
 
 func main() {
