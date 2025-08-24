@@ -33,16 +33,28 @@ type UniquePath struct {
 
 func ClearFiles(deleteQueue <-chan UniquePath, records *sync.Map) {
 	for uniquePath := range deleteQueue {
-
-		if id, _ := records.Load(uniquePath.Path); id.(uuid.UUID) != uniquePath.Id {
-
-			continue
-
+		storedID, exists := records.Load(uniquePath.Path)
+		if !exists {
+			continue // Record doesn't exist
 		}
 
+		// Safe type assertion
+		storedUUID, ok := storedID.(uuid.UUID)
+		if !ok {
+			continue // Wrong type stored
+		}
+
+		if storedUUID != uniquePath.Id {
+			continue // ID mismatch, file was overwritten
+		}
+
+		// Delete file and clean up record
 		if err := os.RemoveAll(uniquePath.Path); err != nil {
 			log.Println("Error removing file: " + err.Error())
 		}
+
+		// Clean up memory AFTER successful deletion
+		records.Delete(uniquePath.Path)
 	}
 }
 
@@ -208,7 +220,7 @@ func IndexController(router *Router) func(w http.ResponseWriter, r *http.Request
 			<div class="method get">GET</div>
 			<div class="path">/@{identifier}</div>
 			<div class="description">Download the file with the specified identifier</div>
-			<div class="example">curl -X GET http://%s/@myfile</div>
+			<div class="example">curl -X GET https://%s/@myfile</div>
 		</div>
 		
 		<div class="limit">Maximum file size: 5GB</div>
@@ -305,29 +317,21 @@ func UploadController(router *Router) func(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-		var id uuid.UUID
-
-		for {
-
-			id, err = uuid.NewV7()
-			if err == nil {
-
-				break
-
-			}
-
+		// Generate UUID with proper error handling
+		id, err := uuid.NewV7()
+		if err != nil {
+			http.Error(w, "Internal error: ID generation failed", http.StatusInternalServerError)
+			router.logger.Debug("Error generating UUID: " + err.Error())
+			return
 		}
 
-		// A uuid is obtained to uniquely identify a file if its overwritten, preventing an older non-existing version from deleting a newer one sooner than 1 hour
-
+		// Store UUID to prevent race conditions
 		router.records.Store(filePath, id)
 
+		// Schedule deletion after 1 hour
 		go func(filepath string, id uuid.UUID) {
-
 			<-time.After(time.Hour)
 			router.deleteQueue <- UniquePath{Path: filepath, Id: id}
-			router.records.Delete(filepath)
-
 		}(filePath, id)
 
 		downloadURL := fmt.Sprintf("/@%s", ident)
