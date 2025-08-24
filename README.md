@@ -16,8 +16,8 @@ A minimal HTTP file transfer service for temporary file sharing.
 
 ```bash
 go build
-# If no port is specified, remcpy defaults to 5000
-./remcpy -port 8080
+# If no port is specified, remcpy defaults to 5000. If no display host is provided, remcpy defaults to remcpy.ice.computer
+./remcpy --port 8080 --display-host "remcpy.ice.computer"
 ```
 
 ### Upload a file
